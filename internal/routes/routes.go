@@ -1,0 +1,23 @@
+package routes
+
+import (
+	"github.com/gin-gonic/gin"
+
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/config"
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/handler"
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/session"
+)
+
+// Deps is everything the route files need to attach handlers and guards.
+type Deps struct {
+	Config   *config.Config
+	Handlers *handler.Handlers
+	Sessions session.Store
+}
+
+// Register mounts every route group under the given /api/v1 group.
+func Register(api *gin.RouterGroup, d Deps) {
+	registerAuth(api, d)
+	registerAdmin(api, d)
+	// registerUser(api, d)  // add as you grow
+}

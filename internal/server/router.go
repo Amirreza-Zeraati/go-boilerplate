@@ -12,6 +12,7 @@ import (
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/middleware"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/redis"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/session"
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/routes"
 )
 
 // Deps are everything the router needs to wire routes and middleware.
@@ -48,33 +49,11 @@ func NewRouter(d Deps) *gin.Engine {
 	r.GET("/readyz", d.Handlers.Health.Ready)
 
 	api := r.Group("/api/v1")
-
-	// Public auth routes.
-	auth := api.Group("/auth")
-	{
-		auth.POST("/register", d.Handlers.Auth.Register)
-		auth.POST("/login", d.Handlers.Auth.Login)
-	}
-
-	// Authenticated routes: require a valid session.
-	authed := api.Group("")
-	authed.Use(middleware.Auth(d.Sessions, d.Config.Session))
-	{
-		authed.POST("/auth/logout", d.Handlers.Auth.Logout)
-		authed.GET("/auth/me", d.Handlers.Auth.Me)
-	}
-
-	// Admin routes: require session AND the "admin" role. Example placeholder.
-	admin := api.Group("/admin")
-	admin.Use(
-		middleware.Auth(d.Sessions, d.Config.Session),
-		middleware.RequireRole("admin"),
-	)
-	{
-		admin.GET("/ping", func(c *gin.Context) {
-			c.JSON(200, gin.H{"data": "pong from admin"})
-		})
-	}
+	routes.Register(api, routes.Deps{
+		Config:   d.Config,
+		Handlers: d.Handlers,
+		Sessions: d.Sessions,
+	})
 
 	return r
 }
