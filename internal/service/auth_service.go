@@ -10,9 +10,15 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/apperr"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/models"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/repository"
 )
+
+// dummyHash is a valid bcrypt hash of a value nobody will guess. Comparing
+// against it when the email is unknown keeps login timing roughly constant, so
+// an attacker can't detect registered emails from response latency.
+const dummyHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
 
 // AuthService handles registration and credential verification. It knows
 // nothing about sessions or cookies — that's the handler's job.
@@ -28,15 +34,17 @@ func NewAuthService(users repository.UserRepository) *AuthService {
 // Register creates a new user with a bcrypt-hashed password and the default
 // "user" role. Returns ErrEmailTaken if the email already exists.
 func (s *AuthService) Register(ctx context.Context, email, password string) (*models.User, error) {
-	if _, err := s.users.GetByEmail(ctx, email); err == nil {
+	_, err := s.users.GetByEmail(ctx, email)
+	switch {
+	case err == nil:
 		return nil, ErrEmailTaken
-	} else if !errors.Is(err, repository.ErrNotFound) {
-		return nil, err
+	case !errors.Is(err, repository.ErrNotFound):
+		return nil, apperr.Internal("could not create account").Wrap(err)
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, err
+		return nil, apperr.Internal("could not create account").Wrap(err)
 	}
 
 	user := &models.User{
@@ -45,23 +53,22 @@ func (s *AuthService) Register(ctx context.Context, email, password string) (*mo
 		Role:         "user",
 	}
 	if err := s.users.Create(ctx, user); err != nil {
-		return nil, err
+		return nil, apperr.Internal("could not create account").Wrap(err)
 	}
 	return user, nil
 }
 
 // Authenticate verifies an email/password pair and returns the user on success.
-// It always returns ErrInvalidCredentials for both "no such user" and "wrong
-// password" so callers can't distinguish the two (avoids user enumeration).
+// It returns ErrInvalidCredentials for both "no such user" and "wrong password"
+// so callers can't distinguish the two (avoids user enumeration).
 func (s *AuthService) Authenticate(ctx context.Context, email, password string) (*models.User, error) {
 	user, err := s.users.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			// Run a dummy compare to keep timing roughly constant.
-			_ = bcrypt.CompareHashAndPassword([]byte("$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidin"), []byte(password))
+			_ = bcrypt.CompareHashAndPassword([]byte(dummyHash), []byte(password))
 			return nil, ErrInvalidCredentials
 		}
-		return nil, err
+		return nil, apperr.Internal("could not sign in").Wrap(err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
@@ -77,7 +84,7 @@ func (s *AuthService) GetByID(ctx context.Context, id uuid.UUID) (*models.User, 
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrUserNotFound
 		}
-		return nil, err
+		return nil, apperr.Internal("could not load user").Wrap(err)
 	}
 	return user, nil
 }

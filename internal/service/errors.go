@@ -1,11 +1,15 @@
 package service
 
-import "errors"
+import "github.com/Amirreza-Zeraati/go-boilerplate/internal/apperr"
 
-// Domain-level errors returned by services. Handlers map these to HTTP status
-// codes without importing the repository or infrastructure layers.
+// Domain-level errors returned by services. Each already carries the HTTP
+// status and machine-readable code, so handlers just pass them to
+// response.Fail without mapping anything themselves.
+//
+// These are shared values; apperr's Wrap/WithField helpers copy before
+// mutating, so decorating one at a call site cannot corrupt the sentinel.
 var (
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrEmailTaken         = errors.New("email already registered")
-	ErrUserNotFound       = errors.New("user not found")
+	ErrInvalidCredentials = apperr.Unauthorized("invalid email or password")
+	ErrEmailTaken         = apperr.Conflict("email already registered")
+	ErrUserNotFound       = apperr.NotFound("user not found")
 )

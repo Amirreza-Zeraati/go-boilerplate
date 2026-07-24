@@ -1,13 +1,15 @@
 package middleware
 
 import (
+	"fmt"
 	"log/slog"
-	"net/http"
 	"time"
 
-	"github.com/Amirreza-Zeraati/go-boilerplate/internal/response"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/apperr"
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/response"
 )
 
 const requestIDHeader = "X-Request-ID"
@@ -38,7 +40,7 @@ func Logger(log *slog.Logger) gin.HandlerFunc {
 			"status", c.Writer.Status(),
 			"latency_ms", time.Since(start).Milliseconds(),
 			"ip", c.ClientIP(),
-			"request_id", RequestID(),
+			"request_id", CurrentRequestID(c),
 		}
 		switch {
 		case c.Writer.Status() >= 500:
@@ -60,9 +62,13 @@ func Recovery(log *slog.Logger) gin.HandlerFunc {
 				log.Error("panic recovered",
 					"error", r,
 					"path", c.Request.URL.Path,
-					"request_id", RequestID(),
+					"request_id", CurrentRequestID(c),
 				)
-				response.AbortError(c, http.StatusInternalServerError, "internal server error")
+				// Wrap the panic value so the cause reaches the logs while the
+				// client only sees a generic message.
+				err := apperr.Internal("internal server error").
+					Wrap(fmt.Errorf("panic: %v", r))
+				response.AbortFail(c, err)
 			}
 		}()
 		c.Next()

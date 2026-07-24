@@ -2,10 +2,10 @@ package middleware
 
 import (
 	"errors"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/apperr"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/config"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/response"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/session"
@@ -19,7 +19,7 @@ func Auth(store session.Store, cfg config.Session) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sid, err := c.Cookie(cfg.CookieName)
 		if err != nil || sid == "" {
-			response.AbortError(c, http.StatusUnauthorized, "authentication required")
+			response.AbortFail(c, apperr.Unauthorized("authentication required"))
 			return
 		}
 
@@ -27,10 +27,10 @@ func Auth(store session.Store, cfg config.Session) gin.HandlerFunc {
 		if err != nil {
 			if errors.Is(err, session.ErrNotFound) {
 				ClearSessionCookie(c, cfg)
-				response.AbortError(c, http.StatusUnauthorized, "session expired")
+				response.AbortFail(c, apperr.Unauthorized("session expired"))
 				return
 			}
-			response.AbortError(c, http.StatusInternalServerError, "could not verify session")
+			response.AbortFail(c, apperr.Internal("could not verify session").Wrap(err))
 			return
 		}
 
@@ -55,11 +55,11 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, ok := CurrentRole(c)
 		if !ok {
-			response.AbortError(c, http.StatusUnauthorized, "authentication required")
+			response.AbortFail(c, apperr.Unauthorized("authentication required"))
 			return
 		}
 		if _, ok := allowed[role]; !ok {
-			response.AbortError(c, http.StatusForbidden, "insufficient permissions")
+			response.AbortFail(c, apperr.Forbidden("insufficient permissions"))
 			return
 		}
 		c.Next()

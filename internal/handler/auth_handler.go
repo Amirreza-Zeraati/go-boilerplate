@@ -1,31 +1,44 @@
 // Package handler contains the Gin HTTP handlers. Handlers translate between
-// HTTP and the service layer: bind+validate input, call a service, map domain
-// errors to status codes, and write a response. No business logic lives here.
+// HTTP and the service layer: bind+validate input, call a service, and write a
+// response. Error-to-status mapping lives in the error itself (see apperr), so
+// handlers just forward failures to response.Fail. No business logic here.
 package handler
 
 import (
-	"errors"
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/apperr"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/config"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/dto"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/middleware"
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/models"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/response"
-	"github.com/Amirreza-Zeraati/go-boilerplate/internal/service"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/session"
 )
 
+// AuthService is the behavior AuthHandler needs. Declaring the interface here,
+// on the consumer side, is the idiomatic Go pattern: the service package stays
+// free of interfaces it doesn't use, and tests can pass a fake.
+// *service.AuthService satisfies this.
+type AuthService interface {
+	Register(ctx context.Context, email, password string) (*models.User, error)
+	Authenticate(ctx context.Context, email, password string) (*models.User, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*models.User, error)
+}
+
 // AuthHandler serves the auth endpoints.
 type AuthHandler struct {
-	auth     *service.AuthService
+	auth     AuthService
 	sessions session.Store
 	cfg      config.Session
 }
 
 // NewAuthHandler builds the auth handler.
-func NewAuthHandler(auth *service.AuthService, sessions session.Store, cfg config.Session) *AuthHandler {
+func NewAuthHandler(auth AuthService, sessions session.Store, cfg config.Session) *AuthHandler {
 	return &AuthHandler{auth: auth, sessions: sessions, cfg: cfg}
 }
 
@@ -33,17 +46,13 @@ func NewAuthHandler(auth *service.AuthService, sessions session.Store, cfg confi
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req dto.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ValidationError(c, err)
+		response.Fail(c, response.BindError(err))
 		return
 	}
 
 	user, err := h.auth.Register(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
-		if errors.Is(err, service.ErrEmailTaken) {
-			response.Error(c, http.StatusConflict, err.Error())
-			return
-		}
-		response.Error(c, http.StatusInternalServerError, "could not create account")
+		response.Fail(c, err)
 		return
 	}
 	response.JSON(c, http.StatusCreated, dto.NewUserResponse(user))
@@ -54,17 +63,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req dto.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ValidationError(c, err)
+		response.Fail(c, response.BindError(err))
 		return
 	}
 
 	user, err := h.auth.Authenticate(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidCredentials) {
-			response.Error(c, http.StatusUnauthorized, err.Error())
-			return
-		}
-		response.Error(c, http.StatusInternalServerError, "could not sign in")
+		response.Fail(c, err)
 		return
 	}
 
@@ -73,7 +78,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		Role:   user.Role,
 	})
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "could not create session")
+		response.Fail(c, apperr.Internal("could not create session").Wrap(err))
 		return
 	}
 
@@ -95,17 +100,13 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) Me(c *gin.Context) {
 	id, ok := middleware.CurrentUserID(c)
 	if !ok {
-		response.Error(c, http.StatusUnauthorized, "authentication required")
+		response.Fail(c, apperr.Unauthorized("authentication required"))
 		return
 	}
 
 	user, err := h.auth.GetByID(c.Request.Context(), id)
 	if err != nil {
-		if errors.Is(err, service.ErrUserNotFound) {
-			response.Error(c, http.StatusNotFound, "user not found")
-			return
-		}
-		response.Error(c, http.StatusInternalServerError, "could not load user")
+		response.Fail(c, err)
 		return
 	}
 	response.JSON(c, http.StatusOK, dto.NewUserResponse(user))

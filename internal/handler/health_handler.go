@@ -8,18 +8,21 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/database"
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/metrics"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/redis"
 )
 
 // HealthHandler serves liveness and readiness probes.
 type HealthHandler struct {
-	db  *database.DB
-	rdb *redis.Client
+	db      *database.DB
+	rdb     *redis.Client
+	metrics *metrics.Metrics
 }
 
-// NewHealthHandler builds the health handler.
-func NewHealthHandler(db *database.DB, rdb *redis.Client) *HealthHandler {
-	return &HealthHandler{db: db, rdb: rdb}
+// NewHealthHandler builds the health handler. metrics may be nil, in which case
+// readiness simply doesn't publish dependency gauges.
+func NewHealthHandler(db *database.DB, rdb *redis.Client, m *metrics.Metrics) *HealthHandler {
+	return &HealthHandler{db: db, rdb: rdb, metrics: m}
 }
 
 // Live is a liveness probe: is the process up? It checks no dependencies, so a
@@ -31,6 +34,9 @@ func (h *HealthHandler) Live(c *gin.Context) {
 // Ready is a readiness probe: can the app serve traffic? It pings every
 // critical dependency and returns 503 if any is down, so load balancers stop
 // routing until the app is truly ready.
+//
+// It also mirrors each result into the dependency_up gauge, so the same check
+// that gates traffic is what Prometheus alerts on.
 func (h *HealthHandler) Ready(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
@@ -38,13 +44,21 @@ func (h *HealthHandler) Ready(c *gin.Context) {
 	checks := gin.H{"database": "ok", "redis": "ok"}
 	ready := true
 
-	if err := h.db.Ping(ctx); err != nil {
+	dbUp := h.db.Ping(ctx) == nil
+	if !dbUp {
 		checks["database"] = "unavailable"
 		ready = false
 	}
-	if err := h.rdb.Ping(ctx); err != nil {
+
+	redisUp := h.rdb.Ping(ctx) == nil
+	if !redisUp {
 		checks["redis"] = "unavailable"
 		ready = false
+	}
+
+	if h.metrics != nil {
+		h.metrics.SetDependencyUp("postgres", dbUp)
+		h.metrics.SetDependencyUp("redis", redisUp)
 	}
 
 	status := http.StatusOK

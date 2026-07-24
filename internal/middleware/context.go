@@ -46,9 +46,16 @@ func CurrentSessionID(c *gin.Context) (string, bool) {
 	return id, ok
 }
 
-// RequestID returns the per-request correlation ID.
-//func RequestID(c *gin.Context) string {
-//	v, _ := c.Get(ctxRequestID)
-//	id, _ := v.(string)
-//	return id
-//}
+// CurrentRequestID returns the per-request correlation ID set by the RequestID
+// middleware, or "" if that middleware didn't run.
+//
+// Named Current* rather than RequestID to avoid colliding with the RequestID()
+// middleware constructor in this same package.
+func CurrentRequestID(c *gin.Context) string {
+	v, ok := c.Get(ctxRequestID)
+	if !ok {
+		return ""
+	}
+	id, _ := v.(string)
+	return id
+}

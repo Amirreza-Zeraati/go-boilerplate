@@ -2,12 +2,12 @@ package middleware
 
 import (
 	"context"
-	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/apperr"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/config"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/redis"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/response"
@@ -50,7 +50,7 @@ func RateLimit(rdb *redis.Client, cfg config.RateLimit) gin.HandlerFunc {
 
 		if count > int64(cfg.Requests) {
 			c.Header("Retry-After", windowSecs)
-			response.AbortError(c, http.StatusTooManyRequests, "rate limit exceeded")
+			response.AbortFail(c, apperr.RateLimited("rate limit exceeded"))
 			return
 		}
 		c.Next()

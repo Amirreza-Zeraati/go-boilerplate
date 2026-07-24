@@ -11,6 +11,7 @@ import (
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/config"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/database"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/handler"
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/metrics"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/migrate"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/redis"
 	"github.com/Amirreza-Zeraati/go-boilerplate/internal/repository"
@@ -68,7 +69,14 @@ func run() error {
 	}
 	log.Info("redis connected")
 
-	// 6. Wire layers: repositories -> services -> session store -> handlers.
+	// 6. Metrics.
+	var m *metrics.Metrics
+	if cfg.Metrics.Enabled {
+		m = metrics.New()
+		log.Info("metrics enabled", "path", cfg.Metrics.Path)
+	}
+
+	// 7. Wire layers: repositories -> services -> session store -> handlers.
 	repos := &repository.Repositories{
 		User: repository.NewUserRepository(db),
 	}
@@ -77,26 +85,27 @@ func run() error {
 
 	handlers := &handler.Handlers{
 		Auth:   handler.NewAuthHandler(services.Auth, sessions, cfg.Session),
-		Health: handler.NewHealthHandler(db, rdb),
+		Health: handler.NewHealthHandler(db, rdb, m),
 	}
 
-	// 7. Router + server.
+	// 8. Router + server.
 	router := server.NewRouter(server.Deps{
 		Config:   cfg,
 		Log:      log,
 		Redis:    rdb,
 		Sessions: sessions,
 		Handlers: handlers,
+		Metrics:  m,
 	})
 	srv := server.New(cfg, router)
 
-	// 8. Start in a goroutine so main can wait for a shutdown signal.
+	// 9. Start in a goroutine so main can wait for a shutdown signal.
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- srv.Start(log)
 	}()
 
-	// 9. Graceful shutdown on SIGINT/SIGTERM.
+	// 10. Graceful shutdown on SIGINT/SIGTERM.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 

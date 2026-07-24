@@ -1,13 +1,18 @@
 // Package response standardizes JSON output so every endpoint returns the same
 // shape: {"data": ...} on success, {"error": {...}} on failure.
+//
+// Handlers should call Fail(c, err) and let it derive the status code from the
+// error, rather than choosing a status themselves.
 package response
 
 import (
 	"errors"
-	"net/http"
+	"log/slog"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+
+	"github.com/Amirreza-Zeraati/go-boilerplate/internal/apperr"
 )
 
 // Envelope is the success shape.
@@ -20,7 +25,10 @@ type ErrorBody struct {
 	Error ErrorDetail `json:"error"`
 }
 
+// ErrorDetail is the error payload. Code is stable and machine-readable;
+// Message is human-readable; Fields is populated for validation failures.
 type ErrorDetail struct {
+	Code    string            `json:"code"`
 	Message string            `json:"message"`
 	Fields  map[string]string `json:"fields,omitempty"`
 }
@@ -30,33 +38,56 @@ func JSON(c *gin.Context, status int, data any) {
 	c.JSON(status, Envelope{Data: data})
 }
 
-// Error writes an error payload with a message.
-func Error(c *gin.Context, status int, message string) {
-	c.JSON(status, ErrorBody{Error: ErrorDetail{Message: message}})
+// Fail writes an error response derived from err. Server-side faults (5xx) are
+// logged with their wrapped cause; the client only ever sees the safe message.
+func Fail(c *gin.Context, err error) {
+	appErr, body := prepare(c, err)
+	c.JSON(appErr.Status, body)
 }
 
-// AbortError writes an error payload and stops the middleware chain. Use inside
-// middleware so no downstream handler runs.
-func AbortError(c *gin.Context, status int, message string) {
-	c.AbortWithStatusJSON(status, ErrorBody{Error: ErrorDetail{Message: message}})
+// AbortFail is Fail for use inside middleware: it also stops the chain so no
+// downstream handler runs.
+func AbortFail(c *gin.Context, err error) {
+	appErr, body := prepare(c, err)
+	c.AbortWithStatusJSON(appErr.Status, body)
 }
 
-// ValidationError inspects a binding error. If it's a validator error it
-// returns a 422 with per-field messages; otherwise a generic 400.
-func ValidationError(c *gin.Context, err error) {
+// prepare converts err to an *apperr.Error, logs it if it's a server fault, and
+// builds the wire body.
+func prepare(c *gin.Context, err error) (*apperr.Error, ErrorBody) {
+	appErr := apperr.From(err)
+
+	if appErr.IsServer() {
+		// Log the full chain, including the wrapped cause, which is never sent
+		// to the client.
+		slog.Error("request failed",
+			"code", string(appErr.Code),
+			"status", appErr.Status,
+			"path", c.Request.URL.Path,
+			"method", c.Request.Method,
+			"err", appErr.Error(),
+		)
+	}
+
+	return appErr, ErrorBody{Error: ErrorDetail{
+		Code:    string(appErr.Code),
+		Message: appErr.Message,
+		Fields:  appErr.Fields,
+	}}
+}
+
+// BindError converts a Gin binding error into an *apperr.Error: a validator
+// failure becomes a 422 with per-field messages, anything else a 400.
+func BindError(err error) *apperr.Error {
 	var ve validator.ValidationErrors
 	if errors.As(err, &ve) {
 		fields := make(map[string]string, len(ve))
 		for _, fe := range ve {
 			fields[fe.Field()] = messageFor(fe)
 		}
-		c.JSON(http.StatusUnprocessableEntity, ErrorBody{Error: ErrorDetail{
-			Message: "validation failed",
-			Fields:  fields,
-		}})
-		return
+		return apperr.Validation("validation failed").WithFields(fields)
 	}
-	Error(c, http.StatusBadRequest, "invalid request body")
+	return apperr.InvalidInput("invalid request body").Wrap(err)
 }
 
 func messageFor(fe validator.FieldError) string {

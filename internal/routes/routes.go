@@ -1,3 +1,6 @@
+// Package routes registers the HTTP routes, one file per domain. The server
+// package owns the engine and global middleware; this package owns which
+// endpoints exist and which guards protect them.
 package routes
 
 import (

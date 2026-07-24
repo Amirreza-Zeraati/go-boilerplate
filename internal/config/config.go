@@ -20,6 +20,7 @@ type Config struct {
 	Session   Session
 	CORS      CORS
 	RateLimit RateLimit
+	Metrics   Metrics
 	Log       Log
 }
 
@@ -81,6 +82,11 @@ type RateLimit struct {
 	Enabled  bool          `env:"RATE_LIMIT_ENABLED" envDefault:"true"`
 	Requests int           `env:"RATE_LIMIT_REQUESTS" envDefault:"100"`
 	Window   time.Duration `env:"RATE_LIMIT_WINDOW" envDefault:"1m"`
+}
+
+type Metrics struct {
+	Enabled bool   `env:"METRICS_ENABLED" envDefault:"true"`
+	Path    string `env:"METRICS_PATH" envDefault:"/metrics"`
 }
 
 type Log struct {
